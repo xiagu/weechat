@@ -339,6 +339,77 @@ gui_completion_nick_strdup_ignore_chars (const char *string)
 }
 
 /*
+ * Duplicates a nick, removing the first character if it's set as a prefix
+ * character to ignore.
+ *
+ * Note: result must be freed after use.
+ */
+
+char *
+gui_completion_nick_strdup_ignore_prefix_chars (const char *string)
+{
+    int char_size;
+    char *result, *pos, utf_char[16];
+    int done_with_prefix = 0;
+
+    result = malloc (strlen (string) + 1);
+    pos = result;
+    while (string[0])
+    {
+        char_size = utf8_char_size (string);
+        memcpy (utf_char, string, char_size);
+        utf_char[char_size] = '\0';
+
+        if (done_with_prefix
+            || !strstr (CONFIG_STRING(config_completion_nick_ignore_prefix_chars),
+                        utf_char))
+        {
+            memcpy (pos, utf_char, char_size);
+            pos += char_size;
+            /* stop checking the prefix after we don't skip a character */
+            done_with_prefix = 1;
+        }
+
+        string += char_size;
+    }
+    pos[0] = '\0';
+    return result;
+}
+
+/*
+ * Returns the prefix characters leading a nick, if any.
+ *
+ * Note: result must be freed after use.
+ */
+
+char *
+gui_completion_nick_get_ignored_prefix_chars (const char *string)
+{
+    int char_size;
+    char *result, *pos, utf_char[16];
+
+    result = malloc (strlen (string) + 1);
+    pos = result;
+    while (string[0])
+    {
+        char_size = utf8_char_size (string);
+        memcpy (utf_char, string, char_size);
+        utf_char[char_size] = '\0';
+
+        if (!strstr (CONFIG_STRING(config_completion_nick_ignore_prefix_chars),
+                     utf_char))
+            break;
+
+        memcpy (pos, utf_char, char_size);
+        pos += char_size;
+
+        string += char_size;
+    }
+    pos[0] = '\0';
+    return result;
+}
+
+/*
  * Locale and case independent string comparison with max length for nicks
  * (alpha or digits only).
  *
@@ -351,23 +422,50 @@ gui_completion_nick_strdup_ignore_chars (const char *string)
 int
 gui_completion_nickncmp (const char *base_word, const char *nick, int max)
 {
-    char *base_word2, *nick2;
+    char *stripped_base_word, *ignored_base_word, *ignored_nick;
     int return_cmp;
 
-    if (!CONFIG_STRING(config_completion_nick_ignore_chars)
-        || !CONFIG_STRING(config_completion_nick_ignore_chars)[0]
-        || !base_word || !nick || !base_word[0] || !nick[0]
-        || gui_completion_nick_has_ignored_chars (base_word))
+    if (!base_word || !nick || !base_word[0] || !nick[0])
         return string_strncasecmp (base_word, nick, max);
 
-    base_word2 = gui_completion_nick_strdup_ignore_chars (base_word);
-    nick2 = gui_completion_nick_strdup_ignore_chars (nick);
+    if (CONFIG_STRING(config_completion_nick_ignore_prefix_chars)
+        && CONFIG_STRING(config_completion_nick_ignore_prefix_chars)[0])
+    {
+        // strip off the first character(s)
+        stripped_base_word = gui_completion_nick_strdup_ignore_prefix_chars (base_word);
+    }
+    else
+    {
+        stripped_base_word = strndup (base_word, max);
+    }
 
-    return_cmp = string_strncasecmp (base_word2, nick2,
-                                     utf8_strlen (base_word2));
+    /* If the regular ignore chars option isn't set or is ""
+     * or either the base_word or nick are null / ""
+     * or the base word has ignored chars (like you manually typed a [ and hit
+     * tab)
+     * THEN: just do string comparison
+     */
+    if (!CONFIG_STRING(config_completion_nick_ignore_chars)
+        || !CONFIG_STRING(config_completion_nick_ignore_chars)[0]
+        || gui_completion_nick_has_ignored_chars (stripped_base_word))
+    {
+        // if the previous conditional isn't used, then max is still valid...
+        return_cmp = string_strncasecmp (stripped_base_word, nick,
+                                         utf8_strlen (stripped_base_word));
+    }
+    else
+    {
+        ignored_base_word = gui_completion_nick_strdup_ignore_chars (stripped_base_word);
+        ignored_nick   = gui_completion_nick_strdup_ignore_chars (nick);
 
-    free (base_word2);
-    free (nick2);
+        return_cmp = string_strncasecmp (ignored_base_word, ignored_nick,
+                                         utf8_strlen (ignored_base_word));
+
+        free (ignored_base_word);
+        free (ignored_nick);
+    }
+
+    free (stripped_base_word);
 
     return return_cmp;
 }
@@ -411,6 +509,7 @@ gui_completion_list_add (struct t_gui_completion *completion, const char *word,
                 index = -1;
             }
 
+            // NICK COMPLETER LINE ######
             if (nick_completion && (completion->base_word_pos == 0))
             {
                 snprintf (buffer, sizeof (buffer), "%s%s",
@@ -803,20 +902,12 @@ gui_completion_find_context (struct t_gui_completion *completion,
     {
         i = pos;
         pos_start = i;
-        prefix_chars_option_disabled = !CONFIG_STRING(config_completion_ignore_prefix_chars)
-            || !CONFIG_STRING(config_completion_ignore_prefix_chars)[0];
-        /* allow completion of word even after a space, and skip the null character ending the line */
-        /* searching backwards is okay because partial UTF-8 bytes will never match an ASCII character */
-        if (data[i] == ' ' || data[i] == '\0')
+        if (data[i] == ' ')
         {
-            if ((i > 0) && (data[i-1] != ' ') && (prefix_chars_option_disabled
-                || (!strchr (CONFIG_STRING(config_completion_ignore_prefix_chars),
-                             data[i-1]))))
+            if ((i > 0) && (data[i-1] != ' '))
             {
                 i--;
-                while ((i >= 0) && (data[i] != ' ') && (prefix_chars_option_disabled
-                    || (!strchr (CONFIG_STRING(config_completion_ignore_prefix_chars),
-                                 data[i]))))
+                while ((i >= 0) && (data[i] != ' '))
                 {
                     i--;
                 }
@@ -825,9 +916,7 @@ gui_completion_find_context (struct t_gui_completion *completion,
         }
         else
         {
-            while ((i >= 0) && (data[i] != ' ') && (prefix_chars_option_disabled
-                || (!strchr (CONFIG_STRING(config_completion_ignore_prefix_chars),
-                             data[i]))))
+            while ((i >= 0) && (data[i] != ' '))
             {
                 i--;
             }
@@ -1119,18 +1208,47 @@ gui_completion_complete (struct t_gui_completion *completion)
                 completion->word_found = strdup (ptr_completion_word->word);
                 completion->word_found_is_nick =
                     ptr_completion_word->nick_completion;
-                if (ptr_completion_word->nick_completion
-                    && !CONFIG_BOOLEAN(config_completion_nick_add_space))
+                if (ptr_completion_word->nick_completion)
                 {
-                    completion->add_space = 0;
-                }
+                    if (!CONFIG_BOOLEAN(config_completion_nick_add_space))
+                    {
+                        completion->add_space = 0;
+                    }
 
-                /* stop after first nick if user asked that */
-                if (ptr_completion_word->nick_completion
-                    && CONFIG_BOOLEAN(config_completion_nick_first_only))
-                {
-                    gui_completion_stop (completion);
-                    return;
+                    // TODO: Here can add a conditional to set a property on the completion struct
+                    // like completion->stripped_prefix = get_prefix_from_thingy
+                    // and then can re-add it wherever add_space gets used
+                    // alternative: just change the word that is found as the completion by
+                    // adding the stripped prefix to it
+                    // that's way better yeah
+                    if (CONFIG_STRING(config_completion_nick_ignore_prefix_chars)
+                        && CONFIG_STRING(config_completion_nick_ignore_prefix_chars)[0])
+                        // TODO: && completion->base_word has a prefix
+                    {
+                        free (completion->word_found);
+
+                        char * prefix =
+                            gui_completion_nick_get_ignored_prefix_chars (completion->base_word);
+
+                        char buffer[512];
+                        int combined_size = utf8_char_size(ptr_completion_word->word)
+                            * (utf8_strlen(prefix) + utf8_strlen(ptr_completion_word->word));
+                        // char * buffer = malloc(combined_size);
+
+                        snprintf(buffer, sizeof (buffer), "%s%s",
+                                 prefix, ptr_completion_word->word);
+
+                        completion->word_found = strdup(buffer);
+
+                        free (prefix);
+                    }
+
+                    /* stop after first nick if user asked that */
+                    if (CONFIG_BOOLEAN(config_completion_nick_first_only))
+                    {
+                        gui_completion_stop (completion);
+                        return;
+                    }
                 }
 
                 index2 = (completion->direction < 0) ? index - 1 : index + 1;
