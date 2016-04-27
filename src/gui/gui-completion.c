@@ -810,9 +810,6 @@ gui_completion_find_context (struct t_gui_completion *completion,
     int i, command_arg, pos_start, pos_end;
     const char *ptr_command, *ptr_data, *prev_char;
 
-    /* to prevent a bunch of repeated computation */
-    int prefix_chars_option_disabled;
-
     /* look for context */
     gui_completion_free_data (completion);
     gui_completion_buffer_init (completion, completion->buffer);
@@ -1208,6 +1205,8 @@ gui_completion_complete (struct t_gui_completion *completion)
                 completion->word_found = strdup (ptr_completion_word->word);
                 completion->word_found_is_nick =
                     ptr_completion_word->nick_completion;
+                // TODO make sure this is ok
+                completion->position_replace = completion->base_word_pos;
                 if (ptr_completion_word->nick_completion)
                 {
                     if (!CONFIG_BOOLEAN(config_completion_nick_add_space))
@@ -1215,30 +1214,15 @@ gui_completion_complete (struct t_gui_completion *completion)
                         completion->add_space = 0;
                     }
 
-                    // TODO: Here can add a conditional to set a property on the completion struct
-                    // like completion->stripped_prefix = get_prefix_from_thingy
-                    // and then can re-add it wherever add_space gets used
-                    // alternative: just change the word that is found as the completion by
-                    // adding the stripped prefix to it
-                    // that's way better yeah
+                    /* add the length of the skipped prefix to the position */
                     if (CONFIG_STRING(config_completion_nick_ignore_prefix_chars)
                         && CONFIG_STRING(config_completion_nick_ignore_prefix_chars)[0])
                         // TODO: && completion->base_word has a prefix
                     {
-                        free (completion->word_found);
-
                         char * prefix =
                             gui_completion_nick_get_ignored_prefix_chars (completion->base_word);
 
-                        char buffer[512];
-                        int combined_size = utf8_char_size(ptr_completion_word->word)
-                            * (utf8_strlen(prefix) + utf8_strlen(ptr_completion_word->word));
-                        // char * buffer = malloc(combined_size);
-
-                        snprintf(buffer, sizeof (buffer), "%s%s",
-                                 prefix, ptr_completion_word->word);
-
-                        completion->word_found = strdup(buffer);
+                        completion->position_replace += strlen (prefix);
 
                         free (prefix);
                     }
@@ -1256,11 +1240,11 @@ gui_completion_complete (struct t_gui_completion *completion)
                 {
                     ptr_completion_word2 =
                         (struct t_gui_completion_word *)(completion->list->data[index2]);
-                    if ((ptr_completion_word->nick_completion
+                    if ((ptr_completion_word2->nick_completion
                          && (gui_completion_nickncmp (completion->base_word,
                                                       ptr_completion_word2->word,
                                                       length) == 0))
-                        || (!ptr_completion_word->nick_completion
+                        || (!ptr_completion_word2->nick_completion
                             && (string_strncasecmp (completion->base_word,
                                                     ptr_completion_word2->word,
                                                     length) == 0)))
@@ -1313,6 +1297,10 @@ gui_completion_complete (struct t_gui_completion *completion)
             }
             other_completion++;
         }
+        /*
+         * Loop until the last completion used has been encountered, then return
+         * the next matching completion. Cycle through the completion list.
+         */
         if (completion->word_found &&
             (strcmp (ptr_completion_word->word, completion->word_found) == 0))
             word_found_seen = 1;
