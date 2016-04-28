@@ -59,6 +59,8 @@ IMPORT_TEST_GROUP(Url);
 IMPORT_TEST_GROUP(Utf8);
 IMPORT_TEST_GROUP(Util);
 
+IMPORT_TEST_GROUP(Completion);
+
 
 /*
  * Callback for any message displayed by WeeChat or a plugin.
