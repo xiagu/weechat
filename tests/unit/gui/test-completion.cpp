@@ -20,12 +20,20 @@ extern "C"
 TEST_GROUP(Completion)
 {
     struct t_gui_buffer *buffer;
+    char *str; /* for WEE_TEST_STR macro */
 
     void setup()
     {
         buffer = gui_buffer_new (NULL, "testing_buffer",
                                  NULL, NULL, NULL,
                                  NULL, NULL, NULL);
+
+        gui_nicklist_add_nick(buffer, buffer->nicklist_root, "Alice",
+                              NULL, NULL, NULL, 1);
+        gui_nicklist_add_nick(buffer, buffer->nicklist_root, "Alice[Ignore]",
+                              NULL, NULL, NULL, 1);
+        gui_nicklist_add_nick(buffer, buffer->nicklist_root, "Alice|Phone",
+                              NULL, NULL, NULL, 1);
     }
 
     void teardown()
@@ -47,9 +55,6 @@ TEST_GROUP(Completion)
 
 TEST(Completion, Next)
 {
-    /* there may be a fancy way to beforeAll / beforeEach style buildup */
-    config_file_option_reset(config_completion_nick_ignore_chars, 0);
-
     struct t_gui_buffer *buffer;
     struct t_gui_completion *completion;
 
@@ -73,17 +78,17 @@ TEST(Completion, Next)
     /* completion->position is updated in gui_input_complete which is above
      * these in the call chain, so it's not run */
     gui_completion_search (completion, 1, NULL, 1, 1);
-    WEE_TEST_STR(completion->word_found, strdup ("Alice:"));
+    WEE_TEST_STR("Alice:", strdup (completion->word_found));
 
     gui_completion_search (completion, 1, NULL, 1, 1);
-    WEE_TEST_STR(completion->word_found, strdup ("Alice[Ignore]:"));
+    WEE_TEST_STR("Alice[Ignore]:", strdup (completion->word_found));
 
     gui_completion_search (completion, 1, NULL, 1, 1);
-    WEE_TEST_STR(completion->word_found, strdup ("Alice|Phone:"));
+    WEE_TEST_STR("Alice|Phone:", strdup (completion->word_found));
 
     /* test cycling */
     gui_completion_search (completion, 1, NULL, 1, 1);
-    WEE_TEST_STR(completion->word_found, strdup ("Alice:"));
+    WEE_TEST_STR("Alice:", strdup (completion->word_found));
 
     gui_completion_free (completion);
     free (buffer);
@@ -109,32 +114,55 @@ TEST(Completion, Next)
 
 TEST(Completion, NextWithBuffer)
 {
-    /* there may be a fancy way to beforeAll / beforeEach style buildup */
-    config_file_option_reset(config_completion_nick_ignore_chars, 0);
-
-    gui_nicklist_add_nick(buffer, buffer->nicklist_root, "Alice",
-                          NULL, NULL, NULL, 1);
-    gui_nicklist_add_nick(buffer, buffer->nicklist_root, "Alice[Ignore]",
-                          NULL, NULL, NULL, 1);
-    gui_nicklist_add_nick(buffer, buffer->nicklist_root, "Alice|Phone",
-                          NULL, NULL, NULL, 1);
-
     gui_input_insert(buffer, "A");
-
-    char *str; /* for test macro */
 
     /* completion->position is updated in gui_input_complete which is above
      * these in the call chain, so it's not run */
     gui_input_complete_next (buffer);
-    WEE_TEST_STR(buffer->input_buffer, strdup ("Alice: "));
+    WEE_TEST_STR("Alice: ", strdup (buffer->input_buffer));
 
     gui_input_complete_next (buffer);
-    WEE_TEST_STR(buffer->input_buffer, strdup ("Alice[Ignore]: "));
+    WEE_TEST_STR("Alice[Ignore]: ", strdup (buffer->input_buffer));
 
     gui_input_complete_next (buffer);
-    WEE_TEST_STR(buffer->input_buffer, strdup ("Alice|Phone: "));
+    WEE_TEST_STR("Alice|Phone: ", strdup (buffer->input_buffer));
 
     /* test cycling */
     gui_input_complete_next (buffer);
-    WEE_TEST_STR(buffer->input_buffer, strdup ("Alice: "));
+    WEE_TEST_STR("Alice: ", strdup (buffer->input_buffer));
+}
+
+/*
+ * Test prefix-agnostic completion.
+ *
+ * Tests functions:
+ *   gui_completion_buffer_init
+ *   gui_input_complete_next
+ *   gui_completion_list_add
+ *   gui_completion_search
+ *   gui_completion_find_context
+ *   gui_completion_auto
+ *   gui_completion_build_list_template
+ *   gui_completion_custom
+ *   gui_completion_complete
+ */
+
+TEST(Completion, PrefixAgnosticNext)
+{
+    gui_input_insert(buffer, "@A");
+
+    /* completion->position is updated in gui_input_complete which is above
+     * these in the call chain, so it's not run */
+    gui_input_complete_next (buffer);
+    WEE_TEST_STR("@Alice: ", strdup (buffer->input_buffer));
+
+    gui_input_complete_next (buffer);
+    WEE_TEST_STR("@Alice[Ignore]: ", strdup (buffer->input_buffer));
+
+    gui_input_complete_next (buffer);
+    WEE_TEST_STR("@Alice|Phone: ", strdup (buffer->input_buffer));
+
+    /* test cycling */
+    gui_input_complete_next (buffer);
+    WEE_TEST_STR("@Alice: ", strdup (buffer->input_buffer));
 }
