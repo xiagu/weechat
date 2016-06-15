@@ -151,8 +151,6 @@ TEST(Completion, PrefixAgnosticNext)
 {
     gui_input_insert(buffer, "@A");
 
-    /* completion->position is updated in gui_input_complete which is above
-     * these in the call chain, so it's not run */
     gui_input_complete_next (buffer);
     WEE_TEST_STR("@Alice: ", strdup (buffer->input_buffer));
 
@@ -165,4 +163,38 @@ TEST(Completion, PrefixAgnosticNext)
     /* test cycling */
     gui_input_complete_next (buffer);
     WEE_TEST_STR("@Alice: ", strdup (buffer->input_buffer));
+}
+
+TEST(Completion, CommandCompletion)
+{
+    gui_input_insert(buffer, "/bar a");
+
+    // This should not be the completion because commands are completed first
+    gui_nicklist_add_nick(buffer, buffer->nicklist_root, "aardvark",
+                          NULL, NULL, NULL, 1);
+
+    gui_input_complete_next (buffer);
+    WEE_TEST_STR("/bar add ", strdup (buffer->input_buffer));
+
+    // could change if default bar names change
+    gui_input_complete_next (buffer);
+    WEE_TEST_STR("/bar add input ", strdup (buffer->input_buffer));
+}
+
+
+TEST(Completion, CommandCompletionFallback)
+{
+    gui_input_insert(buffer, "/bar al");
+    gui_input_complete_next (buffer);
+    // This is normal behavior: when there's no matching command it falls
+    // back to nick completion.
+    WEE_TEST_STR("/bar Alice ", strdup (buffer->input_buffer));
+}
+
+
+TEST(Completion, CommandCompletionFallbackWithAmpersat)
+{
+    gui_input_insert(buffer, "/bar @a");
+    gui_input_complete_next (buffer);
+    WEE_TEST_STR("/bar @Alice ", strdup (buffer->input_buffer));
 }
