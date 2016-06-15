@@ -1233,15 +1233,23 @@ gui_completion_complete (struct t_gui_completion *completion)
                     completion->add_space = 0;
                 }
 
-                /* add the length of the skipped prefix to the position */
                 if (CONFIG_STRING(config_completion_nick_ignore_prefix_chars)
                     && CONFIG_STRING(config_completion_nick_ignore_prefix_chars)[0])
-                    // TODO: && completion->base_word has a prefix
                 {
                     char * prefix =
                         gui_completion_nick_get_ignored_prefix_chars (completion->base_word);
+                    if (strlen(prefix) > 0)
+                    {
+                        size_t total_length = strlen(prefix)
+                            + strlen(ptr_completion_word->word) + 1;
 
-                    completion->position_replace += strlen (prefix);
+                        char * combined = malloc(total_length);
+                        snprintf(combined, total_length, "%s%s",
+                                 prefix, ptr_completion_word->word);
+
+                        free (completion->word_found);
+                        completion->word_found = combined;
+                    }
 
                     free (prefix);
                 }
