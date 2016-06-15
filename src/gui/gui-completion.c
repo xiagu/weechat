@@ -1418,10 +1418,6 @@ gui_completion_search (struct t_gui_completion *completion, int direction,
     /* if new completion => look for base word */
     if (pos != completion->position)
     {
-        if (completion->word_found)
-            free (completion->word_found);
-        completion->word_found = NULL;
-        completion->word_found_is_nick = 0;
         gui_completion_find_context (completion, data, size, pos);
         completion->force_partial_completion = (direction < 0);
     }
