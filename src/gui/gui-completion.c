@@ -474,6 +474,19 @@ gui_completion_nickncmp (const char *base_word, const char *nick, int max)
 }
 
 /*
+ * Check if a completion matches the base word.
+ */
+
+int
+gui_completion_match (int nick_completion, const char * base_word,
+                      const char * comp, size_t comp_length)
+{
+    return nick_completion
+        ? gui_completion_nickncmp (base_word, comp, comp_length) == 0
+        : string_strncasecmp (base_word, comp, comp_length) == 0;
+}
+
+/*
  * Adds a word to completion list.
  */
 
@@ -489,10 +502,8 @@ gui_completion_list_add (struct t_gui_completion *completion, const char *word,
         return;
 
     if (!completion->base_word || !completion->base_word[0]
-        || (nick_completion && (gui_completion_nickncmp (completion->base_word, word,
-                                                         utf8_strlen (completion->base_word)) == 0))
-        || (!nick_completion && (string_strncasecmp (completion->base_word, word,
-                                                     utf8_strlen (completion->base_word)) == 0)))
+        || gui_completion_match (nick_completion, completion->base_word,
+                                 word, utf8_strlen (completion->base_word)))
     {
         completion_word = malloc (sizeof (*completion_word));
         if (completion_word)
@@ -1209,14 +1220,9 @@ gui_completion_complete (struct t_gui_completion *completion)
     {
         ptr_completion_word =
             (struct t_gui_completion_word *)(completion->list->data[index]);
-        if ((ptr_completion_word->nick_completion
-             && (gui_completion_nickncmp (completion->base_word,
-                                          ptr_completion_word->word,
-                                          length) == 0))
-            || (!ptr_completion_word->nick_completion
-                && (string_strncasecmp (completion->base_word,
-                                        ptr_completion_word->word,
-                                        length) == 0)))
+        if (gui_completion_match (ptr_completion_word->nick_completion,
+                                  completion->base_word,
+                                  ptr_completion_word->word, length))
         {
             completion->word_found_index = index;
             if (completion->word_found)
@@ -1224,8 +1230,6 @@ gui_completion_complete (struct t_gui_completion *completion)
             completion->word_found = strdup (ptr_completion_word->word);
             completion->word_found_is_nick =
                 ptr_completion_word->nick_completion;
-            // TODO make sure this is ok
-            completion->position_replace = completion->base_word_pos;
             if (ptr_completion_word->nick_completion)
             {
                 if (!CONFIG_BOOLEAN(config_completion_nick_add_space))
@@ -1274,21 +1278,16 @@ gui_completion_complete (struct t_gui_completion *completion)
                 {
                     ptr_completion_word2 =
                         (struct t_gui_completion_word *)(completion->list->data[index2]);
-                    if ((ptr_completion_word2->nick_completion
-                         && (gui_completion_nickncmp (completion->base_word,
-                                                      ptr_completion_word2->word,
-                                                      length) == 0))
-                        || (!ptr_completion_word2->nick_completion
-                            && (string_strncasecmp (completion->base_word,
-                                                    ptr_completion_word2->word,
-                                                    length) == 0)))
+                    if (gui_completion_match (ptr_completion_word2->nick_completion,
+                                              completion->base_word,
+                                              ptr_completion_word2->word, length))
                     {
                         completion->other_completion = 1;
                         break;
                     }
 
-                    index2 = index = gui_completion_next_index(index2,
-                                                               completion->direction);
+                    index2 = gui_completion_next_index(index2,
+                                                       completion->direction);
                 }
             }
 
