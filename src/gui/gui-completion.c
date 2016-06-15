@@ -122,6 +122,7 @@ gui_completion_buffer_init (struct t_gui_completion *completion,
 
     completion->word_found = NULL;
     completion->word_found_is_nick = 0;
+    completion->word_found_index = -1;
     completion->position_replace = 0;
     completion->diff_size = 0;
     completion->diff_length = 0;
@@ -1131,6 +1132,18 @@ gui_completion_partial_build_list (struct t_gui_completion *completion,
 }
 
 /*
+ * Add or subtract 1 from the given index as appropriate for the iteration
+ * direction.
+ * direction < 0: subtract 1
+ * direction >= 0: add 1
+ */
+
+int
+gui_completion_next_index (int index, int direction)
+{
+    return index + ((direction < 0) ? -1 : 1);
+}
+/*
  * Completes word using matching items.
  */
 
@@ -1176,13 +1189,20 @@ gui_completion_complete (struct t_gui_completion *completion)
         return;
     }
 
+    // index = completion->word_found_index;
     index = -1;
     if (completion->list)
     {
-        if (completion->direction < 0)
-            index = completion->list->size - 1;
+        if (index == -1)
+            /*
+             * Hasn't been set before and needs to be set now. Set to beginning
+             * or end of list depending on iteration direction.
+             */
+            index = (completion->direction < 0)
+                ? completion->list->size - 1
+                : 0;
         else
-            index = 0;
+            index = gui_completion_next_index(index, completion->direction);
     }
 
     while ((index >= 0) && (index < completion->list->size))
@@ -1200,6 +1220,7 @@ gui_completion_complete (struct t_gui_completion *completion)
         {
             if ((!completion->word_found) || word_found_seen)
             {
+                completion->word_found_index = index;
                 if (completion->word_found)
                     free (completion->word_found);
                 completion->word_found = strdup (ptr_completion_word->word);
@@ -1235,7 +1256,8 @@ gui_completion_complete (struct t_gui_completion *completion)
                     }
                 }
 
-                index2 = (completion->direction < 0) ? index - 1 : index + 1;
+                /* check if other completions exist or if that was the only one */
+                index2 = gui_completion_next_index(index, completion->direction);;
                 while ((index2 >= 0) && (index2 < completion->list->size))
                 {
                     ptr_completion_word2 =
@@ -1252,10 +1274,15 @@ gui_completion_complete (struct t_gui_completion *completion)
                         other_completion++;
                     }
 
-                    index2 = (completion->direction < 0) ?
-                        index2 - 1 : index2 + 1;
+                    index2 = index = gui_completion_next_index(index2,
+                                                               completion->direction);
                 }
 
+                /*
+                 * If there aren't other completions, then don't reuse the
+                 * completion list next time. (Tab position -1 will never match
+                 * an actual tab press, forcing a context recalculation.)
+                 */
                 if (other_completion == 0)
                     completion->position = -1;
                 else
@@ -1263,6 +1290,7 @@ gui_completion_complete (struct t_gui_completion *completion)
                         completion->position = 0;
 
                 /* stop after common prefix, if asked by user */
+                /* Why not just return the common prefix and be done with it...? */
                 if (partial_completion
                     && ((utf8_strlen (completion->word_found) >= common_prefix_size))
                     && (other_completion > 0))
@@ -1295,17 +1323,23 @@ gui_completion_complete (struct t_gui_completion *completion)
 
                 return;
             }
+            // oh that's how
+            // okay so instead... ...!
+            // this is stupid why isn't this just stored for the struct anyway
+            // there's no reason to do an O(n) check every time
+            // I mean it's not like it's *expensive* but why even bother...?
+            // you could just compute it once and then access it.
             other_completion++;
         }
         /*
          * Loop until the last completion used has been encountered, then return
          * the next matching completion. Cycle through the completion list.
          */
-        if (completion->word_found &&
-            (strcmp (ptr_completion_word->word, completion->word_found) == 0))
+        if (completion->word_found_index >= 0
+            && index == completion->word_found_index)
             word_found_seen = 1;
 
-        index = (completion->direction < 0) ? index - 1 : index + 1;
+        index = gui_completion_next_index(index, completion->direction);
     }
 
     /*
@@ -1370,8 +1404,7 @@ gui_completion_auto (struct t_gui_completion *completion)
     /* use default template completion */
     if (completion->list->size == 0)
     {
-        gui_completion_build_list_template (
-            completion,
+        gui_completion_build_list_template (completion,
             CONFIG_STRING(config_completion_default_template),
             NULL);
     }
