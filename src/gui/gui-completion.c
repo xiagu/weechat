@@ -127,6 +127,8 @@ gui_completion_buffer_init (struct t_gui_completion *completion,
     completion->diff_size = 0;
     completion->diff_length = 0;
 
+    completion->other_completion = -1;
+
     completion->partial_list = arraylist_new (
         0, 0, 0,
         &gui_completion_word_compare_cb, NULL,
@@ -1150,13 +1152,11 @@ gui_completion_next_index (int index, int direction)
 void
 gui_completion_complete (struct t_gui_completion *completion)
 {
-    int length, word_found_seen, other_completion, partial_completion;
+    int length, partial_completion;
     int common_prefix_size, index, index2;
     struct t_gui_completion_word *ptr_completion_word, *ptr_completion_word2;
 
     length = utf8_strlen (completion->base_word);
-    word_found_seen = 0;
-    other_completion = 0;
 
     partial_completion = completion->force_partial_completion;
 
@@ -1189,11 +1189,11 @@ gui_completion_complete (struct t_gui_completion *completion)
         return;
     }
 
-    // index = completion->word_found_index;
-    index = -1;
+    index = completion->word_found_index;
+    // TODO: may be able to convert this to a guard clause
     if (completion->list)
     {
-        if (index == -1)
+        if (index == -1) // default value of word_found_index
             /*
              * Hasn't been set before and needs to be set now. Set to beginning
              * or end of list depending on iteration direction.
@@ -1218,45 +1218,49 @@ gui_completion_complete (struct t_gui_completion *completion)
                                         ptr_completion_word->word,
                                         length) == 0)))
         {
-            if ((!completion->word_found) || word_found_seen)
+            completion->word_found_index = index;
+            if (completion->word_found)
+                free (completion->word_found);
+            completion->word_found = strdup (ptr_completion_word->word);
+            completion->word_found_is_nick =
+                ptr_completion_word->nick_completion;
+            // TODO make sure this is ok
+            completion->position_replace = completion->base_word_pos;
+            if (ptr_completion_word->nick_completion)
             {
-                completion->word_found_index = index;
-                if (completion->word_found)
-                    free (completion->word_found);
-                completion->word_found = strdup (ptr_completion_word->word);
-                completion->word_found_is_nick =
-                    ptr_completion_word->nick_completion;
-                // TODO make sure this is ok
-                completion->position_replace = completion->base_word_pos;
-                if (ptr_completion_word->nick_completion)
+                if (!CONFIG_BOOLEAN(config_completion_nick_add_space))
                 {
-                    if (!CONFIG_BOOLEAN(config_completion_nick_add_space))
-                    {
-                        completion->add_space = 0;
-                    }
-
-                    /* add the length of the skipped prefix to the position */
-                    if (CONFIG_STRING(config_completion_nick_ignore_prefix_chars)
-                        && CONFIG_STRING(config_completion_nick_ignore_prefix_chars)[0])
-                        // TODO: && completion->base_word has a prefix
-                    {
-                        char * prefix =
-                            gui_completion_nick_get_ignored_prefix_chars (completion->base_word);
-
-                        completion->position_replace += strlen (prefix);
-
-                        free (prefix);
-                    }
-
-                    /* stop after first nick if user asked that */
-                    if (CONFIG_BOOLEAN(config_completion_nick_first_only))
-                    {
-                        gui_completion_stop (completion);
-                        return;
-                    }
+                    completion->add_space = 0;
                 }
 
-                /* check if other completions exist or if that was the only one */
+                /* add the length of the skipped prefix to the position */
+                if (CONFIG_STRING(config_completion_nick_ignore_prefix_chars)
+                    && CONFIG_STRING(config_completion_nick_ignore_prefix_chars)[0])
+                    // TODO: && completion->base_word has a prefix
+                {
+                    char * prefix =
+                        gui_completion_nick_get_ignored_prefix_chars (completion->base_word);
+
+                    completion->position_replace += strlen (prefix);
+
+                    free (prefix);
+                }
+
+                /* stop after first nick if user asked that */
+                if (CONFIG_BOOLEAN(config_completion_nick_first_only))
+                {
+                    gui_completion_stop (completion);
+                    return;
+                }
+            }
+
+            /* Check if other completions exist or if that was the only one.
+             * There's no need to wrap here because this is only computed
+             * the first time, which means that the first completion in the
+             * list was found, and any other ones are later in the list. */
+            if (completion->other_completion == -1)
+            {
+                completion->other_completion = 0; // default to none
                 index2 = gui_completion_next_index(index, completion->direction);;
                 while ((index2 >= 0) && (index2 < completion->list->size))
                 {
@@ -1271,73 +1275,60 @@ gui_completion_complete (struct t_gui_completion *completion)
                                                     ptr_completion_word2->word,
                                                     length) == 0)))
                     {
-                        other_completion++;
+                        completion->other_completion = 1;
+                        break;
                     }
 
                     index2 = index = gui_completion_next_index(index2,
                                                                completion->direction);
                 }
+            }
 
-                /*
-                 * If there aren't other completions, then don't reuse the
-                 * completion list next time. (Tab position -1 will never match
-                 * an actual tab press, forcing a context recalculation.)
-                 */
-                if (other_completion == 0)
-                    completion->position = -1;
-                else
-                    if (completion->position < 0)
-                        completion->position = 0;
+            /*
+             * If there aren't other completions, then don't reuse the
+             * completion list next time. (Tab position -1 will never match
+             * an actual tab press, forcing a context recalculation.)
+             */
+            if (completion->other_completion == 0)
+                completion->position = -1;
+            else
+                if (completion->position < 0)
+                    completion->position = 0;
 
-                /* stop after common prefix, if asked by user */
-                /* Why not just return the common prefix and be done with it...? */
-                if (partial_completion
-                    && ((utf8_strlen (completion->word_found) >= common_prefix_size))
-                    && (other_completion > 0))
+            /* stop after common prefix, if asked by user */
+            /* Why not just return the common prefix and be done with it...? */
+            if (partial_completion
+                && ((utf8_strlen (completion->word_found) >= common_prefix_size))
+                && (completion->other_completion > 0))
+            {
+                completion->word_found[common_prefix_size] = '\0';
+                completion->word_found_is_nick = 0;
+                completion->add_space = 0;
+                completion->position = -1;
+                string_tolower (completion->word_found);
+
+                /* alert user of partial completion */
+                if (CONFIG_BOOLEAN(config_completion_partial_completion_alert))
                 {
-                    completion->word_found[common_prefix_size] = '\0';
-                    completion->word_found_is_nick = 0;
-                    completion->add_space = 0;
-                    completion->position = -1;
-                    string_tolower (completion->word_found);
-
-                    /* alert user of partial completion */
-                    if (CONFIG_BOOLEAN(config_completion_partial_completion_alert))
-                    {
-                        fprintf (stderr, "\a");
-                        fflush (stderr);
-                    }
-
-                    /*
-                     * send "partial_completion" signal, to display possible
-                     * completions in bar item
-                     */
-                    gui_completion_partial_build_list (completion,
-                                                       common_prefix_size);
-                    (void) hook_signal_send ("partial_completion",
-                                             WEECHAT_HOOK_SIGNAL_STRING, NULL);
-                    return;
+                    fprintf (stderr, "\a");
+                    fflush (stderr);
                 }
 
-                arraylist_clear (completion->partial_list);
-
+                /*
+                 * send "partial_completion" signal, to display possible
+                 * completions in bar item
+                 */
+                gui_completion_partial_build_list (completion,
+                                                   common_prefix_size);
+                (void) hook_signal_send ("partial_completion",
+                                         WEECHAT_HOOK_SIGNAL_STRING, NULL);
                 return;
             }
-            // oh that's how
-            // okay so instead... ...!
-            // this is stupid why isn't this just stored for the struct anyway
-            // there's no reason to do an O(n) check every time
-            // I mean it's not like it's *expensive* but why even bother...?
-            // you could just compute it once and then access it.
-            other_completion++;
+
+            arraylist_clear (completion->partial_list);
+
+            return;
         }
-        /*
-         * Loop until the last completion used has been encountered, then return
-         * the next matching completion. Cycle through the completion list.
-         */
-        if (completion->word_found_index >= 0
-            && index == completion->word_found_index)
-            word_found_seen = 1;
 
         index = gui_completion_next_index(index, completion->direction);
     }
@@ -1350,6 +1341,7 @@ gui_completion_complete (struct t_gui_completion *completion)
     {
         free (completion->word_found);
         completion->word_found = NULL;
+        completion->word_found_index = -1;
         completion->word_found_is_nick = 0;
         gui_completion_complete (completion);
     }

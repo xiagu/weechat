@@ -59,6 +59,8 @@ struct t_gui_completion
     int diff_size;                /* size difference (< 0 = char(s) deleted) */
     int diff_length;              /* length difference (<= diff_size)        */
 
+    int other_completion;         /* more than 1 completion found?           */
+
     /* partial completion */
     struct t_arraylist *partial_list;
 };
